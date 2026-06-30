@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ioc-vet"
+version = "0.1.0"
+description = "Fast, multi-source IOC enrichment from your terminal — IPs, domains, URLs, and hashes against AbuseIPDB, URLhaus, and more."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Your Name" }]
+keywords = ["security", "cybersecurity", "threat-intelligence", "ioc", "soc", "blue-team", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "typer>=0.12.0",
+    "httpx>=0.27.0",
+    "rich>=13.7.0",
+    "pydantic>=2.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/ioc-vet"
+Issues = "https://github.com/your-username/ioc-vet/issues"
+
+[project.scripts]
+iocvet = "iocvet.cli:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iocvet"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
