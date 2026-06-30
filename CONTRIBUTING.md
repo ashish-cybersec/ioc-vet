@@ -21,7 +21,7 @@ Thanks for considering it. The fastest way to make a meaningful contribution her
 ## Development setup
 
 ```bash
-git clone https://github.com/your-username/ioc-vet
+git clone https://github.com/ashish-cybersec/ioc-vet
 cd ioc-vet
 pip install -e ".[dev]"
 pytest

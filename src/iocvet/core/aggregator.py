@@ -14,7 +14,7 @@ from iocvet.core.detector import detect_ioc_type, normalize
 from iocvet.core.models import EnrichmentReport, IOCType
 from iocvet.providers import ALL_PROVIDERS, Provider
 
-_USER_AGENT = "iocvet/0.1 (+https://github.com/your-username/ioc-vet)"
+_USER_AGENT = "iocvet/0.1 (+https://github.com/ashish-cybersec/ioc-vet)"
 
 
 def _instantiate_providers() -> list[Provider]:
