@@ -9,12 +9,37 @@ for anyone who wants to add a source we don't cover yet.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from abc import ABC, abstractmethod
 
 import httpx
 
 from iocvet.core.models import IOCType, ProviderResult, Verdict
+
+
+class RateLimiter:
+    """Spaces outbound calls so we stay under a provider's published limit.
+
+    Free tiers are strict: ip-api throttles at 45 req/min and bans an IP for
+    an hour on sustained abuse. A batch of a few hundred IOCs fired at full
+    concurrency will trip that, so each provider paces its own calls. State
+    lives on the provider instance, which is why batch runs reuse instances.
+    """
+
+    def __init__(self, per_minute: int) -> None:
+        self._interval = 60.0 / per_minute
+        self._lock = asyncio.Lock()
+        self._next_at = 0.0
+
+    async def acquire(self) -> None:
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            if self._next_at > now:
+                await asyncio.sleep(self._next_at - now)
+                now = self._next_at
+            self._next_at = now + self._interval
 
 
 class Provider(ABC):
@@ -32,8 +57,14 @@ class Provider(ABC):
     #: Polite default timeout for any single HTTP call.
     timeout_seconds: float = 10.0
 
+    #: Published per-minute cap for this source, or None if unmetered/unknown.
+    rate_limit_per_minute: int | None = None
+
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key
+        self._limiter = (
+            RateLimiter(self.rate_limit_per_minute) if self.rate_limit_per_minute else None
+        )
 
     @property
     def is_configured(self) -> bool:
@@ -74,6 +105,9 @@ class Provider(ABC):
                 ),
             )
 
+        if self._limiter is not None:
+            await self._limiter.acquire()
+
         started = time.perf_counter()
         try:
             result = await self._query(client, ioc, ioc_type)
@@ -86,6 +120,12 @@ class Provider(ABC):
                 error=f"timed out after {self.timeout_seconds}s",
             )
         except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                return ProviderResult(
+                    provider=self.name,
+                    verdict=Verdict.UNKNOWN,
+                    error="rate limited (HTTP 429) — slow down or add a key",
+                )
             return ProviderResult(
                 provider=self.name,
                 verdict=Verdict.UNKNOWN,
