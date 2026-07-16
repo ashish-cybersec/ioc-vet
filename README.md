@@ -61,11 +61,12 @@ iocvet providers
 
 ## Providers
 
-| Provider  | IOC types         | API key needed?                          |
-|-----------|--------------------|-------------------------------------------|
-| ip-api    | IP                 | No — works immediately (non-commercial use only)  |
-| AbuseIPDB | IP                 | Yes, free (1,000 checks/day) — [sign up](https://www.abuseipdb.com/register) |
-| URLhaus   | URL, file hash     | Yes, free — [sign up](https://auth.abuse.ch/) | 
+| Provider  | IOC types              | API key needed? |
+|-----------|------------------------|-----------------|
+| ip-api    | IP                     | No — works immediately (non-commercial use only) |
+| AbuseIPDB | IP                     | Yes, free (1,000 checks/day) — [sign up](https://www.abuseipdb.com/register) |
+| RDAP      | Domain                 | No — works immediately |
+| URLhaus   | Domain, URL, file hash | Yes, free — [sign up](https://auth.abuse.ch/) |
 
 > **Note on ip-api:** the free endpoint is [non-commercial use only](https://ip-api.com/docs/legal) and rate-limited to 45 requests/minute. If you're running iocvet at work or in a company CI pipeline, you need their paid tier — or drop ip-api and rely on the other providers.
 
@@ -109,6 +110,7 @@ Register it in `src/iocvet/providers/__init__.py` and open a PR. Good candidates
 ## Roadmap
 
 - [ ] SQLite response caching (avoid re-querying the same IOC within a TTL)
+- [x] Domain support (RDAP registration data + URLhaus host lookups)
 - [ ] VirusTotal, OTX, GreyNoise, Shodan providers
 - [ ] Markdown / CSV report export for tickets
 - [ ] `--watch` mode to tail a log file and enrich IOCs as they appear

@@ -12,11 +12,13 @@ from __future__ import annotations
 from iocvet.providers.abuseipdb import AbuseIPDBProvider
 from iocvet.providers.base import Provider
 from iocvet.providers.ipapi import IPAPIProvider
+from iocvet.providers.rdap import RDAPProvider
 from iocvet.providers.urlhaus import URLhausProvider
 
 ALL_PROVIDERS: list[type[Provider]] = [
     IPAPIProvider,
     AbuseIPDBProvider,
+    RDAPProvider,
     URLhausProvider,
 ]
 

@@ -13,7 +13,7 @@ Thanks for considering it. The fastest way to make a meaningful contribution her
 
 ## Other contributions we'd welcome
 
-- Domain support: none of the current providers enrich plain domains (only IPs, URLs, and hashes). A WHOIS or passive-DNS provider would close this gap.
+- Passive DNS: domains now resolve via RDAP (registration data) and URLhaus (host lookups), but nothing maps a domain to the IPs it has historically resolved to. A passive-DNS provider would close that gap.
 - SQLite response caching with a configurable TTL.
 - Markdown/CSV export for the `lookup` and `batch` commands.
 - Anything on the [roadmap](README.md#roadmap).
