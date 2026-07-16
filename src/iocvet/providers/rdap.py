@@ -104,7 +104,9 @@ class RDAPProvider(Provider):
     def supports(self, ioc_type: IOCType) -> bool:
         return ioc_type == IOCType.DOMAIN
 
-    async def _query(self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType) -> ProviderResult:
+    async def _query(
+        self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType
+    ) -> ProviderResult:
         # rdap.org answers with a 302 to whichever registry is authoritative
         # for the TLD, so redirects must be followed explicitly — httpx does
         # not follow them by default.
@@ -139,7 +141,9 @@ class RDAPProvider(Provider):
                 verdict = Verdict.SUSPICIOUS
 
         if registered is not None and age_days is not None:
-            summary_bits = [f"registered {registered.date().isoformat()} ({_humanize_age(age_days)})"]
+            summary_bits = [
+                f"registered {registered.date().isoformat()} ({_humanize_age(age_days)})"
+            ]
             if age_days < _NEW_DOMAIN_DAYS:
                 summary_bits.append(f"newly registered (<{_NEW_DOMAIN_DAYS}d)")
         else:

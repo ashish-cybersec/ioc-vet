@@ -296,3 +296,73 @@ async def test_rdap_parses_real_world_example_com_response():
     assert result.details["age_days"] > 10000
     assert result.details["nameservers"] == ["A.IANA-SERVERS.NET", "B.IANA-SERVERS.NET"]
     assert "registered 1995-08-14" in result.summary
+
+
+# --- URLhaus IPv4 host lookups -----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_supports_ipv4_but_not_ipv6():
+    """abuse.ch documents the host parameter as hostname/domain or IPv4.
+    IPv6 is unverified, so it must skip honestly rather than silently
+    returning "no results" for every v6 address.
+    """
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    assert provider.supports(IOCType.IPV4)
+    assert not provider.supports(IOCType.IPV6)
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_ipv4_uses_host_endpoint():
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "query_status": "ok",
+                "urlhaus_reference": "https://urlhaus.abuse.ch/host/45.61.49.78/",
+                "url_count": "4",
+                "blacklists": {"spamhaus_dbl": "not listed"},
+                "urls": [{"url_status": "online"}, {"url_status": "online"}],
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await provider.run(client, "45.61.49.78", IOCType.IPV4)
+
+    assert captured[0].url.path.endswith("/host/")
+    assert "host=45.61.49.78" in captured[0].content.decode()
+    assert result.verdict == Verdict.MALICIOUS
+    assert "2 malware URL(s) currently online" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_ipv6_skips_without_querying():
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await provider.run(client, "2001:4860:4860::8888", IOCType.IPV6)
+
+    assert not called, "IPv6 should skip before any network call"
+    assert result.skipped_reason is not None
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_clean_ipv4_is_unknown_not_clean():
+    """An IP absent from URLhaus just means no malware URLs were recorded —
+    not that the IP is safe. Only ever UNKNOWN.
+    """
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    async with _client({"query_status": "no_results"}) as client:
+        result = await provider.run(client, "8.8.8.8", IOCType.IPV4)
+
+    assert result.verdict == Verdict.UNKNOWN

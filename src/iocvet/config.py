@@ -28,12 +28,45 @@ urlhaus = ""
 """
 
 
+class ConfigError(Exception):
+    """Raised when the user's config file exists but can't be used.
+
+    Separate from a missing file, which is normal and silent: this means the
+    user hand-edited config.toml (which `iocvet configure` explicitly invites)
+    and got something wrong. They deserve a sentence telling them what and
+    where, not a traceback.
+    """
+
+
 def _load_toml_keys() -> dict[str, str]:
     if not CONFIG_PATH.exists():
         return {}
-    with CONFIG_PATH.open("rb") as f:
-        data = tomllib.load(f)
-    return {k: v for k, v in data.get("keys", {}).items() if v}
+    try:
+        with CONFIG_PATH.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{CONFIG_PATH} is not valid TOML: {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"could not read {CONFIG_PATH}: {exc}") from exc
+
+    keys = data.get("keys", {})
+    if not isinstance(keys, dict):
+        raise ConfigError(f"{CONFIG_PATH}: [keys] must be a table, got {type(keys).__name__}")
+
+    resolved: dict[str, str] = {}
+    for name, value in keys.items():
+        if not value:
+            continue
+        # A non-string here used to sail through: the truthiness check passed,
+        # `iocvet providers` reported the provider as configured, and the bogus
+        # value only blew up later inside httpx as a header-encoding error —
+        # surfacing a config typo as a network fault.
+        if not isinstance(value, str):
+            raise ConfigError(
+                f"{CONFIG_PATH}: [keys].{name} must be a string, got {type(value).__name__}"
+            )
+        resolved[name] = value
+    return resolved
 
 
 def get_api_key(env_var: str, toml_key: str) -> str | None:
@@ -51,7 +84,10 @@ def ensure_config_scaffold() -> Path:
     The file is created 0600: it is expected to hold API keys, and a
     world-readable secrets file on a shared host is a real problem.
     """
+    # `mode=` only applies when mkdir actually creates the directory, so an
+    # existing dir keeps whatever permissions it had. chmod unconditionally.
     CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    CONFIG_DIR.chmod(0o700)
     if not CONFIG_PATH.exists():
         CONFIG_PATH.touch(mode=0o600)
         CONFIG_PATH.write_text(_EXAMPLE_CONFIG)

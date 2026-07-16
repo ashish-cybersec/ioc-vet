@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Fast, multi-source IOC enrichment from your terminal — IPs, domains, URLs, and hashes against AbuseIPDB, URLhaus, and more."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Ashish Pulivarthy" }]
 keywords = ["security", "cybersecurity", "threat-intelligence", "ioc", "soc", "blue-team", "cli"]
@@ -15,7 +16,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -51,6 +51,16 @@ packages = ["src/iocvet"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# ruff's default rule set is E4/E7/E9 + F, which does NOT include E501 — so
+# `line-length` above was being enforced by nothing. Select it explicitly.
+extend-select = ["E501", "I", "UP", "B"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer's whole API is function calls in argument defaults; B008 is a false
+# positive against it, not a finding.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

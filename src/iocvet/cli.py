@@ -15,7 +15,7 @@ import typer
 from rich.console import Console
 
 from iocvet import __version__
-from iocvet.config import ensure_config_scaffold
+from iocvet.config import ConfigError, ensure_config_scaffold
 from iocvet.core.aggregator import enrich, enrich_many, list_provider_status
 from iocvet.core.detector import detect_ioc_type
 from iocvet.core.models import IOCType, Verdict
@@ -49,7 +49,9 @@ def main(
 @app.command()
 def lookup(
     ioc: str = typer.Argument(..., help="An IP, domain, URL, or MD5/SHA1/SHA256 hash."),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON instead of a table."),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit machine-readable JSON instead of a table."
+    ),
     fail_on_malicious: bool = typer.Option(
         False,
         "--fail-on-malicious",
@@ -61,7 +63,9 @@ def lookup(
     # produced a clean-looking UNKNOWN report and exit 0 — which, combined with
     # --fail-on-malicious, means a typo in a CI pipeline silently passes.
     if detect_ioc_type(ioc) is IOCType.UNKNOWN:
-        console.print(
+        # stderr, not stdout: `iocvet lookup X --json | jq` must never receive
+        # human-readable text on the channel a parser is reading.
+        err_console.print(
             f"[red]Error:[/red] {ioc!r} is not a recognizable IP, domain, URL, or hash."
         )
         raise typer.Exit(code=2)
@@ -93,8 +97,10 @@ def batch(
     candidates = [
         line.strip() for line in file if line.strip() and not line.strip().startswith("#")
     ]
-    iocs = [c for c in candidates if detect_ioc_type(c) is not IOCType.UNKNOWN]
-    unparseable = [c for c in candidates if detect_ioc_type(c) is IOCType.UNKNOWN]
+    # Classify once; the previous version called detect_ioc_type twice per line.
+    classified = [(c, detect_ioc_type(c)) for c in candidates]
+    iocs = [c for c, t in classified if t is not IOCType.UNKNOWN]
+    unparseable = [c for c, t in classified if t is IOCType.UNKNOWN]
 
     if unparseable:
         # Report to stderr so it never contaminates --json output on stdout.
@@ -129,13 +135,12 @@ def providers() -> None:
     for row in rows:
         if row["configured"]:
             console.print(f"  [green]✓[/green] {row['name']}")
-        elif row["requires_key"]:
-            console.print(
-                f"  [yellow]○[/yellow] {row['name']} "
-                f"[dim](needs {row['env_var']})[/dim]"
-            )
         else:
-            console.print(f"  [green]✓[/green] {row['name']}")
+            # Only ever reached when a key is required but missing:
+            # is_configured is unconditionally True for keyless providers.
+            console.print(
+                f"  [yellow]○[/yellow] {row['name']} [dim](needs {row['env_var']})[/dim]"
+            )
 
 
 @app.command()
@@ -152,6 +157,11 @@ def run() -> None:
     """Entry point used by the console_script and `python -m iocvet`."""
     try:
         app()
+    except ConfigError as exc:
+        # A broken config file is user error, not a crash. Report it in one
+        # line on stderr rather than dumping a traceback.
+        err_console.print(f"[red]Config error:[/red] {exc}")
+        sys.exit(2)
     except KeyboardInterrupt:
         console.print("\n[dim]Interrupted.[/dim]")
         sys.exit(130)
