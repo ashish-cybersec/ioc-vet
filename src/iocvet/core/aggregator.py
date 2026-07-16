@@ -6,6 +6,7 @@ needs to know about asyncio — providers themselves stay simple.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable, Sequence
 
 import httpx
 
@@ -15,6 +16,10 @@ from iocvet.core.models import EnrichmentReport, IOCType
 from iocvet.providers import ALL_PROVIDERS, Provider
 
 _USER_AGENT = "iocvet/0.1 (+https://github.com/ashish-cybersec/ioc-vet)"
+
+#: How many IOCs to have in flight at once during a batch run. Per-provider
+#: rate limits do the real pacing; this just caps socket/memory use.
+_DEFAULT_CONCURRENCY = 8
 
 
 def _instantiate_providers() -> list[Provider]:
@@ -31,23 +36,53 @@ def _instantiate_providers() -> list[Provider]:
     return instances
 
 
-async def enrich(raw_ioc: str, *, ioc_type: IOCType | None = None) -> EnrichmentReport:
-    """Detect (or accept a forced) IOC type, run every applicable provider
-    concurrently, and return a populated report.
-    """
+async def _enrich_one(
+    providers: Sequence[Provider],
+    client: httpx.AsyncClient,
+    raw_ioc: str,
+    ioc_type: IOCType | None = None,
+) -> EnrichmentReport:
     resolved_type = ioc_type or detect_ioc_type(raw_ioc)
     ioc = normalize(raw_ioc, resolved_type)
 
-    providers = _instantiate_providers()
-
-    async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
-        results = await asyncio.gather(
-            *(p.run(client, ioc, resolved_type) for p in providers)
-        )
+    results = await asyncio.gather(*(p.run(client, ioc, resolved_type) for p in providers))
 
     report = EnrichmentReport(ioc=ioc, ioc_type=resolved_type, results=list(results))
     report.overall_verdict = report.compute_overall_verdict()
     return report
+
+
+async def enrich(raw_ioc: str, *, ioc_type: IOCType | None = None) -> EnrichmentReport:
+    """Detect (or accept a forced) IOC type, run every applicable provider
+    concurrently, and return a populated report.
+    """
+    providers = _instantiate_providers()
+    async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
+        return await _enrich_one(providers, client, raw_ioc, ioc_type)
+
+
+async def enrich_many(
+    raw_iocs: Iterable[str], *, concurrency: int = _DEFAULT_CONCURRENCY
+) -> list[EnrichmentReport]:
+    """Enrich a batch of IOCs, reusing one HTTP client and one set of provider
+    instances across the whole run.
+
+    Reuse is not just an optimization: each provider's rate limiter is instance
+    state, so building fresh providers per IOC (the obvious approach) would let
+    every lookup start with a clean quota and blow straight through the free
+    tier's cap.
+    """
+    iocs = list(raw_iocs)
+    providers = _instantiate_providers()
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
+
+        async def _bounded(ioc: str) -> EnrichmentReport:
+            async with semaphore:
+                return await _enrich_one(providers, client, ioc)
+
+        return list(await asyncio.gather(*(_bounded(ioc) for ioc in iocs)))
 
 
 def list_provider_status() -> list[dict[str, object]]:

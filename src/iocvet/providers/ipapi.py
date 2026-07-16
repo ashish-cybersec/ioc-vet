@@ -21,6 +21,9 @@ _FIELDS = "status,message,country,regionName,city,isp,org,as,proxy,hosting,query
 class IPAPIProvider(Provider):
     name = "ip-api"
     requires_key = False
+    # Documented free-tier cap is 45/min; 40 leaves headroom for retries and
+    # for the fact that the window is enforced per source IP, not per process.
+    rate_limit_per_minute = 40
 
     def supports(self, ioc_type: IOCType) -> bool:
         return ioc_type in (IOCType.IPV4, IOCType.IPV6)

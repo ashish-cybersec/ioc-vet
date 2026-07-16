@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import httpx
 
-from iocvet.core.models import HASH_TYPES, IOCType, ProviderResult, Verdict
+from iocvet.core.models import IOCType, ProviderResult, Verdict
 from iocvet.providers.base import Provider
 
 _BASE_URL = "https://urlhaus-api.abuse.ch/v1"
@@ -20,13 +20,19 @@ class URLhausProvider(Provider):
     requires_key = True
     api_key_env = "URLHAUS_AUTH_KEY"
 
+    #: URLhaus indexes payloads by MD5 and SHA256 only. Deliberately NOT
+    #: HASH_TYPES: that set includes SHA1, which the payload endpoint cannot
+    #: look up. Claiming SHA1 support would turn every SHA1 query into a
+    #: silent "not found" — i.e. a false negative on a malware hash.
+    _HASH_FIELDS = {IOCType.MD5: "md5_hash", IOCType.SHA256: "sha256_hash"}
+
     def supports(self, ioc_type: IOCType) -> bool:
-        return ioc_type == IOCType.URL or ioc_type in HASH_TYPES
+        return ioc_type == IOCType.URL or ioc_type in self._HASH_FIELDS
 
     async def _query(self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType) -> ProviderResult:
         if ioc_type == IOCType.URL:
             return await self._query_url(client, ioc)
-        return await self._query_hash(client, ioc)
+        return await self._query_hash(client, ioc, ioc_type)
 
     async def _query_url(self, client: httpx.AsyncClient, url: str) -> ProviderResult:
         resp = await client.post(
@@ -60,10 +66,14 @@ class URLhausProvider(Provider):
             link=data.get("urlhaus_reference"),
         )
 
-    async def _query_hash(self, client: httpx.AsyncClient, file_hash: str) -> ProviderResult:
+    async def _query_hash(
+        self, client: httpx.AsyncClient, file_hash: str, ioc_type: IOCType
+    ) -> ProviderResult:
+        # The payload endpoint expects the hash under a length-specific key
+        # ("md5_hash" / "sha256_hash"), not a generic "hash" param.
         resp = await client.post(
             f"{_BASE_URL}/payload/",
-            data={"hash": file_hash},
+            data={self._HASH_FIELDS[ioc_type]: file_hash},
             headers={"Auth-Key": self.api_key or ""},
             timeout=self.timeout_seconds,
         )

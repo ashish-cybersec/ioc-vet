@@ -16,8 +16,9 @@ from rich.console import Console
 
 from iocvet import __version__
 from iocvet.config import ensure_config_scaffold
-from iocvet.core.aggregator import enrich, list_provider_status
-from iocvet.core.models import Verdict
+from iocvet.core.aggregator import enrich, enrich_many, list_provider_status
+from iocvet.core.detector import detect_ioc_type
+from iocvet.core.models import IOCType, Verdict
 from iocvet.output.terminal import render_report
 
 app = typer.Typer(
@@ -26,6 +27,8 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+#: Warnings/errors go here so they never mix into piped --json output.
+err_console = Console(stderr=True)
 
 
 def _version_callback(value: bool) -> None:
@@ -54,6 +57,15 @@ def lookup(
     ),
 ) -> None:
     """Enrich a single IOC across every configured provider."""
+    # Fail loudly on unparseable input. Previously a typo'd IOC ("8.8.8.888")
+    # produced a clean-looking UNKNOWN report and exit 0 — which, combined with
+    # --fail-on-malicious, means a typo in a CI pipeline silently passes.
+    if detect_ioc_type(ioc) is IOCType.UNKNOWN:
+        console.print(
+            f"[red]Error:[/red] {ioc!r} is not a recognizable IP, domain, URL, or hash."
+        )
+        raise typer.Exit(code=2)
+
     report = asyncio.run(enrich(ioc))
 
     if as_json:
@@ -69,27 +81,45 @@ def lookup(
 def batch(
     file: typer.FileText = typer.Argument(..., help="Path to a file with one IOC per line."),
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON array instead of tables."),
+    fail_on_malicious: bool = typer.Option(
+        False,
+        "--fail-on-malicious",
+        help="Exit with status 1 if ANY IOC in the file is malicious.",
+    ),
 ) -> None:
     """Enrich every IOC in a file, one per line. Blank lines and lines
     starting with '#' are ignored.
     """
-    iocs = [line.strip() for line in file if line.strip() and not line.strip().startswith("#")]
+    candidates = [
+        line.strip() for line in file if line.strip() and not line.strip().startswith("#")
+    ]
+    iocs = [c for c in candidates if detect_ioc_type(c) is not IOCType.UNKNOWN]
+    unparseable = [c for c in candidates if detect_ioc_type(c) is IOCType.UNKNOWN]
+
+    if unparseable:
+        # Report to stderr so it never contaminates --json output on stdout.
+        preview = ", ".join(repr(c) for c in unparseable[:5])
+        more = f" (+{len(unparseable) - 5} more)" if len(unparseable) > 5 else ""
+        err_console.print(
+            f"[yellow]Warning:[/yellow] skipped {len(unparseable)} unparseable line(s): "
+            f"{preview}{more}"
+        )
+
     if not iocs:
-        console.print("[yellow]No IOCs found in file.[/yellow]")
+        err_console.print("[yellow]No valid IOCs found in file.[/yellow]")
         raise typer.Exit(code=1)
 
-    async def _run_all():
-        return await asyncio.gather(*(enrich(ioc) for ioc in iocs))
-
-    reports = asyncio.run(_run_all())
+    reports = asyncio.run(enrich_many(iocs))
 
     if as_json:
         print(json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
-        return
+    else:
+        for report in reports:
+            render_report(report, console=console)
+            console.print()
 
-    for report in reports:
-        render_report(report, console=console)
-        console.print()
+    if fail_on_malicious and any(r.overall_verdict is Verdict.MALICIOUS for r in reports):
+        raise typer.Exit(code=1)
 
 
 @app.command()

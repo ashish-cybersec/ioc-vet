@@ -171,3 +171,82 @@ async def test_urlhaus_supports_hashes_and_urls_only():
     assert provider.supports(IOCType.SHA256)
     assert not provider.supports(IOCType.IPV4)
     assert not provider.supports(IOCType.DOMAIN)
+
+
+# --- Request-shape tests -----------------------------------------------------
+# The _client_with helper above returns a canned body no matter what the request
+# looked like, which means it cannot catch a provider sending the wrong
+# parameter name. These tests capture the outgoing request and assert on it.
+
+
+def _capturing_client(json_body: dict, captured: list[httpx.Request]) -> httpx.AsyncClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=json_body)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+_PAYLOAD_BODY = {
+    "query_status": "ok",
+    "md5_hash": "44d88612fea8a8f36de82e1278abb02f",
+    "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "file_type": "exe",
+    "signature": "Emotet",
+    "firstseen": "2026-01-01",
+    "virustotal": {"result": "42/70", "link": "https://virustotal.com/x"},
+}
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_md5_uses_md5_hash_param():
+    """URLhaus indexes payloads under md5_hash/sha256_hash. Posting a generic
+    'hash' param returns no_results — a false negative on real malware.
+    """
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    captured: list[httpx.Request] = []
+    async with _capturing_client(_PAYLOAD_BODY, captured) as client:
+        result = await provider.run(client, "44d88612fea8a8f36de82e1278abb02f", IOCType.MD5)
+
+    assert result.verdict == Verdict.MALICIOUS
+    assert "md5_hash=44d88612fea8a8f36de82e1278abb02f" in captured[0].content.decode()
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_sha256_uses_sha256_hash_param():
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    captured: list[httpx.Request] = []
+    async with _capturing_client(_PAYLOAD_BODY, captured) as client:
+        result = await provider.run(client, sha, IOCType.SHA256)
+
+    assert result.verdict == Verdict.MALICIOUS
+    assert f"sha256_hash={sha}" in captured[0].content.decode()
+
+
+@pytest.mark.asyncio
+async def test_urlhaus_does_not_claim_sha1_support():
+    """URLhaus has no SHA1 index. Claiming support would map every SHA1 lookup
+    onto a silent 'not found' rather than an honest skip.
+    """
+    provider = URLhausProvider(api_key="fake-key-for-test")
+    assert not provider.supports(IOCType.SHA1)
+
+    async with _client_with({}) as client:
+        result = await provider.run(client, "da39a3ee5e6b4b0d3255bfef95601890afd80709", IOCType.SHA1)
+    assert result.skipped_reason is not None
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_response_is_reported_clearly():
+    provider = IPAPIProvider()
+    provider._limiter = None  # don't actually sleep in tests
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await provider.run(client, "8.8.8.8", IOCType.IPV4)
+
+    assert result.error is not None
+    assert "429" in result.error
