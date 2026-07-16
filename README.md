@@ -1,5 +1,10 @@
 # ioc-vet
 
+[![PyPI](https://img.shields.io/pypi/v/ioc-vet)](https://pypi.org/project/ioc-vet/)
+[![Python](https://img.shields.io/pypi/pyversions/ioc-vet)](https://pypi.org/project/ioc-vet/)
+[![CI](https://github.com/ashish-cybersec/ioc-vet/actions/workflows/ci.yml/badge.svg)](https://github.com/ashish-cybersec/ioc-vet/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Multi-source IOC enrichment from your terminal. Drop in an IP, domain, URL, or file hash — get back a unified verdict pulled from multiple threat intel sources in parallel, instead of opening five browser tabs.
 
 ```
