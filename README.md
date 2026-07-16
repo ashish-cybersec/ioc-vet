@@ -63,9 +63,11 @@ iocvet providers
 
 | Provider  | IOC types         | API key needed?                          |
 |-----------|--------------------|-------------------------------------------|
-| ip-api    | IP                 | No — works immediately                    |
+| ip-api    | IP                 | No — works immediately (non-commercial use only)  |
 | AbuseIPDB | IP                 | Yes, free (1,000 checks/day) — [sign up](https://www.abuseipdb.com/register) |
-| URLhaus   | URL, file hash     | Yes, free — [sign up](https://auth.abuse.ch/) |
+| URLhaus   | URL, file hash     | Yes, free — [sign up](https://auth.abuse.ch/) | 
+
+> **Note on ip-api:** the free endpoint is [non-commercial use only](https://ip-api.com/docs/legal) and rate-limited to 45 requests/minute. If you're running iocvet at work or in a company CI pipeline, you need their paid tier — or drop ip-api and rely on the other providers.
 
 Set keys as environment variables, or run `iocvet configure` to generate a config file at `~/.config/iocvet/config.toml`:
 
