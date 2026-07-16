@@ -164,13 +164,17 @@ async def test_urlhaus_unknown_url_returns_unknown_not_clean():
 
 
 @pytest.mark.asyncio
-async def test_urlhaus_supports_hashes_and_urls_only():
+async def test_urlhaus_supported_ioc_types():
+    # DOMAIN was added when the /host/ endpoint was wired up; see
+    # tests/test_domains.py for the host-lookup behaviour itself. IPs are
+    # still out of scope here even though /host/ accepts them — see the
+    # note in providers/urlhaus.py.
     provider = URLhausProvider(api_key="fake-key-for-test")
     assert provider.supports(IOCType.URL)
+    assert provider.supports(IOCType.DOMAIN)
     assert provider.supports(IOCType.MD5)
     assert provider.supports(IOCType.SHA256)
     assert not provider.supports(IOCType.IPV4)
-    assert not provider.supports(IOCType.DOMAIN)
 
 
 # --- Request-shape tests -----------------------------------------------------
