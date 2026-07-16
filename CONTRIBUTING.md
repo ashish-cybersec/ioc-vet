@@ -31,3 +31,7 @@ ruff check .
 ## Pull request expectations
 
 Keep PRs focused on one provider or one feature. Include tests — mocked, not live — for any new network-calling code. We're not strict about style beyond what `ruff` already enforces.
+
+## Releasing
+
+Maintainers: see [RELEASING.md](RELEASING.md).

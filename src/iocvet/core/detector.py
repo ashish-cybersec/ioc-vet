@@ -32,6 +32,13 @@ def detect_ioc_type(raw: str) -> IOCType:
     if value.lower().startswith(("http://", "https://")):
         return IOCType.URL
 
+    # "example.com." is a fully-qualified domain name with an explicit root
+    # label (RFC 1034) and appears in DNS logs and zone files. Strip the root
+    # dot before matching; without this it fell through to UNKNOWN, which now
+    # means an exit code 2 rather than a shrug.
+    if len(value) > 1 and value.endswith("."):
+        value = value[:-1]
+
     if _MD5_RE.match(value):
         return IOCType.MD5
     if _SHA1_RE.match(value):
@@ -54,6 +61,10 @@ def detect_ioc_type(raw: str) -> IOCType:
 def normalize(raw: str, ioc_type: IOCType) -> str:
     """Light normalization so cache keys and provider calls are consistent."""
     value = raw.strip()
-    if ioc_type in (IOCType.MD5, IOCType.SHA1, IOCType.SHA256, IOCType.DOMAIN):
+    if ioc_type is IOCType.DOMAIN:
+        # Drop the FQDN root dot too, so "example.com." and "example.com"
+        # produce one cache key and one provider query rather than two.
+        return value.rstrip(".").lower()
+    if ioc_type in (IOCType.MD5, IOCType.SHA1, IOCType.SHA256):
         return value.lower()
     return value

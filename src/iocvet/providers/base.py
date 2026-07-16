@@ -77,7 +77,9 @@ class Provider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def _query(self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType) -> ProviderResult:
+    async def _query(
+        self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType
+    ) -> ProviderResult:
         """Do the actual network call and return a normalized result.
 
         Implementations should raise on unexpected failures — `run()`
@@ -131,7 +133,8 @@ class Provider(ABC):
                 verdict=Verdict.UNKNOWN,
                 error=f"HTTP {exc.response.status_code} from {self.name}",
             )
-        except Exception as exc:  # noqa: BLE001 - last line of defense per provider
+        except Exception as exc:  # last line of defense: one bad provider must not
+            # take down the whole lookup, so every unexpected error is captured here.
             return ProviderResult(
                 provider=self.name,
                 verdict=Verdict.UNKNOWN,

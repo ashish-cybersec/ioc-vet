@@ -27,18 +27,31 @@ class URLhausProvider(Provider):
     #: silent "not found" — i.e. a false negative on a malware hash.
     _HASH_FIELDS = {IOCType.MD5: "md5_hash", IOCType.SHA256: "sha256_hash"}
 
-    def supports(self, ioc_type: IOCType) -> bool:
-        return ioc_type in (IOCType.URL, IOCType.DOMAIN) or ioc_type in self._HASH_FIELDS
+    #: Types the /host/ endpoint can resolve. IPv4 is in; IPv6 is deliberately
+    #: NOT, because abuse.ch documents the host parameter as a hostname/domain
+    #: or IPv4 address and says nothing about IPv6. Claiming it anyway would
+    #: turn every IPv6 lookup into a silent "no results" — the same false
+    #: negative the SHA1/URLhaus bug produced. An honest skip is better.
+    _HOST_TYPES = (IOCType.DOMAIN, IOCType.IPV4)
 
-    async def _query(self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType) -> ProviderResult:
+    def supports(self, ioc_type: IOCType) -> bool:
+        return (
+            ioc_type == IOCType.URL
+            or ioc_type in self._HOST_TYPES
+            or ioc_type in self._HASH_FIELDS
+        )
+
+    async def _query(
+        self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType
+    ) -> ProviderResult:
         if ioc_type == IOCType.URL:
             return await self._query_url(client, ioc)
-        if ioc_type == IOCType.DOMAIN:
+        if ioc_type in self._HOST_TYPES:
             return await self._query_host(client, ioc)
         return await self._query_hash(client, ioc, ioc_type)
 
     async def _query_host(self, client: httpx.AsyncClient, host: str) -> ProviderResult:
-        """Look a domain up against URLhaus's host index.
+        """Look a domain or IPv4 address up against URLhaus's host index.
 
         Verdict mapping is deliberately graded rather than binary. A domain
         appearing here means malware URLs have been served from it at some

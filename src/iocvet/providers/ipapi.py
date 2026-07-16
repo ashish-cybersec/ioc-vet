@@ -28,7 +28,9 @@ class IPAPIProvider(Provider):
     def supports(self, ioc_type: IOCType) -> bool:
         return ioc_type in (IOCType.IPV4, IOCType.IPV6)
 
-    async def _query(self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType) -> ProviderResult:
+    async def _query(
+        self, client: httpx.AsyncClient, ioc: str, ioc_type: IOCType
+    ) -> ProviderResult:
         resp = await client.get(
             f"http://ip-api.com/json/{ioc}",
             params={"fields": _FIELDS},

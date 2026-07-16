@@ -165,16 +165,18 @@ async def test_urlhaus_unknown_url_returns_unknown_not_clean():
 
 @pytest.mark.asyncio
 async def test_urlhaus_supported_ioc_types():
-    # DOMAIN was added when the /host/ endpoint was wired up; see
-    # tests/test_domains.py for the host-lookup behaviour itself. IPs are
-    # still out of scope here even though /host/ accepts them — see the
-    # note in providers/urlhaus.py.
+    # DOMAIN and IPV4 both route to the /host/ endpoint; see
+    # tests/test_domains.py for the host-lookup behaviour itself.
+    # SHA1 and IPV6 stay excluded on purpose — abuse.ch documents neither,
+    # and claiming them would produce silent false negatives.
     provider = URLhausProvider(api_key="fake-key-for-test")
     assert provider.supports(IOCType.URL)
     assert provider.supports(IOCType.DOMAIN)
+    assert provider.supports(IOCType.IPV4)
     assert provider.supports(IOCType.MD5)
     assert provider.supports(IOCType.SHA256)
-    assert not provider.supports(IOCType.IPV4)
+    assert not provider.supports(IOCType.IPV6)
+    assert not provider.supports(IOCType.SHA1)
 
 
 # --- Request-shape tests -----------------------------------------------------
@@ -237,7 +239,9 @@ async def test_urlhaus_does_not_claim_sha1_support():
     assert not provider.supports(IOCType.SHA1)
 
     async with _client_with({}) as client:
-        result = await provider.run(client, "da39a3ee5e6b4b0d3255bfef95601890afd80709", IOCType.SHA1)
+        result = await provider.run(
+            client, "da39a3ee5e6b4b0d3255bfef95601890afd80709", IOCType.SHA1
+        )
     assert result.skipped_reason is not None
 
 
