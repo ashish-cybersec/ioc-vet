@@ -7,6 +7,7 @@ from __future__ import annotations
 import ipaddress
 import re
 
+from iocvet.core.defang import refang
 from iocvet.core.models import IOCType
 
 _DOMAIN_RE = re.compile(
@@ -25,7 +26,18 @@ def detect_ioc_type(raw: str) -> IOCType:
     domain regex anyway, but defensive ordering keeps this correct if the
     domain pattern is ever loosened.
     """
-    value = raw.strip()
+    # No legitimate IOC is longer than this: the longest thing we classify is a
+    # URL, and 2048 is the de-facto practical URL ceiling. Anything larger is
+    # malformed or hostile — reject before running any regex over it. Defense in
+    # depth: the regexes are already ReDoS-safe, but there's no reason to spend
+    # cycles on megabyte "indicators", and it bounds memory on batch input.
+    if len(raw) > 2048:
+        return IOCType.UNKNOWN
+
+    # Refang first: analysts paste IOCs straight from tickets and reports,
+    # where they arrive neutered (hxxp://evil[.]com). Everything below then
+    # classifies the real value.
+    value = refang(raw)
     if not value:
         return IOCType.UNKNOWN
 
@@ -58,9 +70,27 @@ def detect_ioc_type(raw: str) -> IOCType:
     return IOCType.UNKNOWN
 
 
+def is_non_global_ip(value: str) -> bool:
+    """True for IPs that must never be sent to a third-party API: private
+    (RFC1918), loopback, link-local (incl. cloud metadata 169.254.169.254),
+    reserved, multicast, or unspecified.
+
+    Sending these externally is an information-disclosure problem — it tells a
+    third party about internal network structure — and pointless besides, since
+    no reputation source can say anything useful about a non-routable address.
+    """
+    try:
+        ip = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return False
+    return not ip.is_global
+
+
 def normalize(raw: str, ioc_type: IOCType) -> str:
     """Light normalization so cache keys and provider calls are consistent."""
-    value = raw.strip()
+    # Must refang here too: a defanged input reaches providers via this path,
+    # and "evil[.]com" would otherwise be sent to the API verbatim.
+    value = refang(raw)
     if ioc_type is IOCType.DOMAIN:
         # Drop the FQDN root dot too, so "example.com." and "example.com"
         # produce one cache key and one provider query rather than two.

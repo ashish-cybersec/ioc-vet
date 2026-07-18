@@ -41,6 +41,8 @@ class ConfigError(Exception):
 def _load_toml_keys() -> dict[str, str]:
     if not CONFIG_PATH.exists():
         return {}
+    if CONFIG_PATH.is_symlink():
+        raise ConfigError(f"{CONFIG_PATH} is a symlink; refusing to read it.")
     try:
         with CONFIG_PATH.open("rb") as f:
             data = tomllib.load(f)
@@ -88,6 +90,14 @@ def ensure_config_scaffold() -> Path:
     # existing dir keeps whatever permissions it had. chmod unconditionally.
     CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     CONFIG_DIR.chmod(0o700)
+    # Refuse to touch a symlinked config: on a shared host a local attacker
+    # could pre-plant config.toml as a symlink to a file they want chmod'd or
+    # truncated, and our chmod/write would follow it to the target.
+    if CONFIG_PATH.is_symlink():
+        raise ConfigError(
+            f"{CONFIG_PATH} is a symlink; refusing to operate on it. "
+            "Remove it and re-run."
+        )
     if not CONFIG_PATH.exists():
         CONFIG_PATH.touch(mode=0o600)
         CONFIG_PATH.write_text(_EXAMPLE_CONFIG)

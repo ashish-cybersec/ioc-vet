@@ -51,6 +51,11 @@ iocvet lookup example.com
 iocvet lookup https://example.com/payload.exe
 iocvet lookup 44d88612fea8a8f36de82e1278abb02f
 
+# Defanged IOCs — paste them straight from a ticket or report
+iocvet lookup 'evil[.]com'
+iocvet lookup 'hxxp://evil[.]com/malware.exe'
+iocvet lookup '1[.]2[.]3[.]4'
+
 # Machine-readable output for scripts/pipelines
 iocvet lookup 8.8.8.8 --json
 
@@ -74,6 +79,35 @@ iocvet providers
 | URLhaus   | IP, domain, URL, file hash | Yes, free — [sign up](https://auth.abuse.ch/) |
 
 > **Note on ip-api:** the free endpoint is [non-commercial use only](https://ip-api.com/docs/legal) and rate-limited to 45 requests/minute. If you're running iocvet at work or in a company CI pipeline, you need their paid tier — or drop ip-api and rely on the other providers.
+
+## Exit codes
+
+`iocvet` uses distinct exit codes so pipelines can branch on them:
+
+| Code | Meaning |
+|------|---------|
+| 0 | Ran successfully (verdict may be clean, suspicious, or unknown) |
+| 1 | `--fail-on-malicious` set and the overall verdict was malicious |
+| 2 | Bad usage — unrecognisable IOC, missing/undecodable file, or config error |
+| 3 | `--fail-on-error` set and at least one IOC had no provider answer |
+
+For a **security gate that must fail closed**, combine both flags:
+
+```bash
+iocvet lookup "$IOC" --fail-on-malicious --fail-on-error
+```
+
+This exits non-zero on a malicious verdict *and* when no provider could reach a
+conclusion — so an outage in the threat-intel sources can't let an unchecked
+indicator pass as clean.
+
+## Security & privacy
+
+iocvet is built to be run against untrusted indicators, so it takes some care:
+
+- **Private and reserved IPs are never sent to external providers.** RFC1918, loopback, link-local (including cloud metadata `169.254.169.254`), and reserved addresses are recognised and skipped — they'd disclose internal network structure to a third party and no reputation source can rate them anyway.
+- **ip-api uses plaintext HTTP** (SSL is paid-tier on their side), so a public IP you look up is visible to an on-path observer. All other providers use HTTPS with certificate verification.
+- Malformed inputs (path traversal, CRLF, multi-value smuggling, oversized strings) are rejected before any request is built. API keys are never written to output, errors, or `--json`.
 
 Set keys as environment variables, or run `iocvet configure` to generate a config file at `~/.config/iocvet/config.toml`:
 

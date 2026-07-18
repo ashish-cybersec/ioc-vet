@@ -10,11 +10,13 @@ for anyone who wants to add a source we don't cover yet.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from abc import ABC, abstractmethod
 
 import httpx
 
+from iocvet.core.detector import is_non_global_ip
 from iocvet.core.models import IOCType, ProviderResult, Verdict
 
 
@@ -28,6 +30,8 @@ class RateLimiter:
     """
 
     def __init__(self, per_minute: int) -> None:
+        if per_minute <= 0:
+            raise ValueError("per_minute must be positive")
         self._interval = 60.0 / per_minute
         self._lock = asyncio.Lock()
         self._next_at = 0.0
@@ -97,6 +101,17 @@ class Provider(ABC):
                 provider=self.name,
                 skipped_reason=f"does not support IOC type '{ioc_type.value}'",
             )
+        # Never send a private/reserved/loopback/link-local address to a
+        # third-party API: it discloses internal network structure and no
+        # reputation source can say anything useful about a non-routable IP.
+        # Enforced here in the base so every provider — including any added
+        # later — inherits it, rather than relying on each to remember.
+        if ioc_type in (IOCType.IPV4, IOCType.IPV6) and is_non_global_ip(ioc):
+            return ProviderResult(
+                provider=self.name,
+                verdict=Verdict.UNKNOWN,
+                skipped_reason="private/reserved IP — not sent to external providers",
+            )
         if not self.is_configured:
             return ProviderResult(
                 provider=self.name,
@@ -121,6 +136,16 @@ class Provider(ABC):
                 verdict=Verdict.UNKNOWN,
                 error=f"timed out after {self.timeout_seconds}s",
             )
+        except httpx.ConnectError:
+            # DNS failure, refused connection, offline, or a blocking proxy.
+            # Report it plainly instead of via the generic-exception catch,
+            # whose "unexpected error: All connection attempts failed" reads
+            # like a bug rather than "you're offline".
+            return ProviderResult(
+                provider=self.name,
+                verdict=Verdict.UNKNOWN,
+                error=f"could not connect to {self.name} (network/DNS)",
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
                 return ProviderResult(
@@ -132,6 +157,16 @@ class Provider(ABC):
                 provider=self.name,
                 verdict=Verdict.UNKNOWN,
                 error=f"HTTP {exc.response.status_code} from {self.name}",
+            )
+        except json.JSONDecodeError:
+            # A non-JSON body where JSON was expected: a captive portal, an
+            # error page, or — on the plaintext ip-api channel — a MITM. Report
+            # it as what it is rather than leaking raw parser internals like
+            # "Expecting value: line 1 column 1".
+            return ProviderResult(
+                provider=self.name,
+                verdict=Verdict.UNKNOWN,
+                error=f"invalid (non-JSON) response from {self.name}",
             )
         except Exception as exc:  # last line of defense: one bad provider must not
             # take down the whole lookup, so every unexpected error is captured here.

@@ -2,12 +2,39 @@
 
 from __future__ import annotations
 
+import sys
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from iocvet.core.models import EnrichmentReport, ProviderResult, Verdict
+
+
+def _stdout_encoding() -> str:
+    """Best-effort name of stdout's encoding, defaulting to utf-8."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    return enc
+
+
+def _can_encode(text: str) -> bool:
+    try:
+        text.encode(_stdout_encoding())
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+#: Glyphs used in output. On a legacy console (Windows cp1252 is the common
+#: case) the fancy ones can't be encoded and rich would raise
+#: UnicodeEncodeError mid-render — crashing the command. We pick ASCII
+#: fallbacks whenever stdout can't represent the preferred glyph, so output
+#: degrades gracefully instead of exploding.
+_ARROW = "\u2192" if _can_encode("\u2192") else "->"
+_CHECK = "\u2713" if _can_encode("\u2713") else "[OK]"
+_CIRCLE = "\u25cb" if _can_encode("\u25cb") else "[ ]"
+
 
 _VERDICT_STYLE = {
     Verdict.MALICIOUS: ("bold white on red", "MALICIOUS"),
@@ -55,7 +82,7 @@ def render_report(report: EnrichmentReport, console: Console | None = None) -> N
 
     for result in report.working_providers:
         if result.link:
-            console.print(f"[dim]{result.provider} →[/dim] {result.link}")
+            console.print(f"[dim]{result.provider} {_ARROW}[/dim] {result.link}")
 
 
 def _row_for(result: ProviderResult) -> tuple[str, Text, str, str]:

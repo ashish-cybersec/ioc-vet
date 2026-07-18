@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -17,9 +18,10 @@ from rich.console import Console
 from iocvet import __version__
 from iocvet.config import ConfigError, ensure_config_scaffold
 from iocvet.core.aggregator import enrich, enrich_many, list_provider_status
+from iocvet.core.defang import is_defanged, refang
 from iocvet.core.detector import detect_ioc_type
 from iocvet.core.models import IOCType, Verdict
-from iocvet.output.terminal import render_report
+from iocvet.output.terminal import _CHECK, _CIRCLE, render_report
 
 app = typer.Typer(
     name="iocvet",
@@ -57,6 +59,11 @@ def lookup(
         "--fail-on-malicious",
         help="Exit with status 1 if the overall verdict is malicious. Useful in CI/scripts.",
     ),
+    fail_on_error: bool = typer.Option(
+        False,
+        "--fail-on-error",
+        help="Exit 3 if no provider could check the IOC (fail-closed for security gates).",
+    ),
 ) -> None:
     """Enrich a single IOC across every configured provider."""
     # Fail loudly on unparseable input. Previously a typo'd IOC ("8.8.8.888")
@@ -70,6 +77,11 @@ def lookup(
         )
         raise typer.Exit(code=2)
 
+    if is_defanged(ioc):
+        # Note on stderr so --json stdout stays clean. Lets the analyst confirm
+        # we read their pasted-from-a-ticket IOC the way they intended.
+        err_console.print(f"[dim]Refanged input → {refang(ioc)}[/dim]")
+
     report = asyncio.run(enrich(ioc))
 
     if as_json:
@@ -80,22 +92,54 @@ def lookup(
     if fail_on_malicious and report.overall_verdict == Verdict.MALICIOUS:
         raise typer.Exit(code=1)
 
+    if fail_on_error and not report.working_providers:
+        # No provider actually answered — "unknown", not "clean". Fail-closed.
+        raise typer.Exit(code=3)
+
 
 @app.command()
 def batch(
-    file: typer.FileText = typer.Argument(..., help="Path to a file with one IOC per line."),
+    file: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to a file with one IOC per line.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON array instead of tables."),
     fail_on_malicious: bool = typer.Option(
         False,
         "--fail-on-malicious",
-        help="Exit with status 1 if ANY IOC in the file is malicious.",
+        help="Exit 1 if ANY IOC in the file is malicious.",
+    ),
+    fail_on_error: bool = typer.Option(
+        False,
+        "--fail-on-error",
+        help="Exit 3 if any IOC could not be checked by a single provider "
+        "(fail-closed for security gates).",
     ),
 ) -> None:
     """Enrich every IOC in a file, one per line. Blank lines and lines
     starting with '#' are ignored.
     """
+    # Read the file ourselves rather than via typer.FileText: real-world IOC
+    # lists come out of Excel/Notepad with a UTF-8 BOM (which would otherwise
+    # corrupt the first line) or in a non-UTF-8 encoding (which would crash with
+    # a raw UnicodeDecodeError). utf-8-sig strips the BOM; a decode failure
+    # becomes a clean message instead of a traceback.
+    try:
+        text = file.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        err_console.print(
+            f"[red]Error:[/red] {file} is not UTF-8 text. Re-save it as UTF-8 "
+            "(one IOC per line)."
+        )
+        raise typer.Exit(code=2) from None
+
     candidates = [
-        line.strip() for line in file if line.strip() and not line.strip().startswith("#")
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
     ]
     # Classify once; the previous version called detect_ioc_type twice per line.
     classified = [(c, detect_ioc_type(c)) for c in candidates]
@@ -127,6 +171,13 @@ def batch(
     if fail_on_malicious and any(r.overall_verdict is Verdict.MALICIOUS for r in reports):
         raise typer.Exit(code=1)
 
+    # Fail-closed option for security gates: if any IOC had zero providers
+    # actually answer (all errored or were skipped), the result is "we don't
+    # know", not "clean". Exit 3 so a pipeline can distinguish this from a
+    # clean run (0) and from a malicious finding (1).
+    if fail_on_error and any(not r.working_providers for r in reports):
+        raise typer.Exit(code=3)
+
 
 @app.command()
 def providers() -> None:
@@ -134,12 +185,12 @@ def providers() -> None:
     rows = list_provider_status()
     for row in rows:
         if row["configured"]:
-            console.print(f"  [green]✓[/green] {row['name']}")
+            console.print(f"  [green]{_CHECK}[/green] {row['name']}")
         else:
             # Only ever reached when a key is required but missing:
             # is_configured is unconditionally True for keyless providers.
             console.print(
-                f"  [yellow]○[/yellow] {row['name']} [dim](needs {row['env_var']})[/dim]"
+                f"  [yellow]{_CIRCLE}[/yellow] {row['name']} [dim](needs {row['env_var']})[/dim]"
             )
 
 
