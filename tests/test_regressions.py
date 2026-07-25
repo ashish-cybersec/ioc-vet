@@ -231,6 +231,7 @@ def _run_cli(*args, env_extra=None):
         [sys.executable, "-m", "iocvet", *args],
         capture_output=True,
         text=True,
+        check=False,
         env=env,
         cwd=str(pathlib.Path(__file__).parent.parent),
     )

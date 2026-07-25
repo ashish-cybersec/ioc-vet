@@ -22,4 +22,4 @@ ALL_PROVIDERS: list[type[Provider]] = [
     URLhausProvider,
 ]
 
-__all__ = ["Provider", "ALL_PROVIDERS"]
+__all__ = ["ALL_PROVIDERS", "Provider"]
