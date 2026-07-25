@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ioc-vet"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fast, multi-source IOC enrichment from your terminal — IPs, domains, URLs, and hashes against AbuseIPDB, URLhaus, and more."
 readme = "README.md"
 license = "MIT"
@@ -27,6 +27,9 @@ dependencies = [
     "httpx>=0.27.0",
     "rich>=13.7.0",
     "pydantic>=2.6.0",
+    # Ships transitively with httpx, but we import it directly for IDN domain
+    # handling, so declare it explicitly rather than rely on a transitive.
+    "idna>=3.0",
     # tomllib is stdlib from 3.11; 3.10 needs the backport.
     "tomli>=2.0.0; python_version < '3.11'",
 ]

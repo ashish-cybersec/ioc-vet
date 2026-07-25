@@ -62,6 +62,12 @@ iocvet lookup 8.8.8.8 --json
 # Batch mode: one IOC per line
 iocvet batch suspicious_ips.txt
 
+# Batch to CSV for a spreadsheet (one row per IOC/provider)
+iocvet batch suspicious_ips.txt --csv -o results.csv
+
+# Internationalised domains work — pasted in their human-readable form
+iocvet lookup münchen.de
+
 # Exit code 1 if malicious — useful in CI or alerting pipelines
 iocvet lookup 1.2.3.4 --fail-on-malicious
 

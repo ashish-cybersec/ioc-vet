@@ -168,7 +168,7 @@ class Provider(ABC):
                 verdict=Verdict.UNKNOWN,
                 error=f"invalid (non-JSON) response from {self.name}",
             )
-        except Exception as exc:  # last line of defense: one bad provider must not
+        except Exception as exc:  # noqa: BLE001 — last-resort provider guard
             # take down the whole lookup, so every unexpected error is captured here.
             return ProviderResult(
                 provider=self.name,

@@ -21,6 +21,7 @@ from iocvet.core.aggregator import enrich, enrich_many, list_provider_status
 from iocvet.core.defang import is_defanged, refang
 from iocvet.core.detector import detect_ioc_type
 from iocvet.core.models import IOCType, Verdict
+from iocvet.output.csv_output import reports_to_csv
 from iocvet.output.terminal import _CHECK, _CIRCLE, render_report
 
 app = typer.Typer(
@@ -107,6 +108,15 @@ def batch(
         help="Path to a file with one IOC per line.",
     ),
     as_json: bool = typer.Option(False, "--json", help="Emit a JSON array instead of tables."),
+    as_csv: bool = typer.Option(
+        False, "--csv", help="Emit CSV (one row per IOC/provider) instead of tables."
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write output to a file instead of stdout (format follows --json/--csv).",
+    ),
     fail_on_malicious: bool = typer.Option(
         False,
         "--fail-on-malicious",
@@ -159,11 +169,34 @@ def batch(
         err_console.print("[yellow]No valid IOCs found in file.[/yellow]")
         raise typer.Exit(code=1)
 
+    if as_json and as_csv:
+        err_console.print("[red]Error:[/red] choose one of --json or --csv, not both.")
+        raise typer.Exit(code=2)
+
     reports = asyncio.run(enrich_many(iocs))
 
+    # Build the machine-readable payload once; write it to a file or stdout.
     if as_json:
-        print(json.dumps([r.model_dump(mode="json") for r in reports], indent=2))
+        payload = json.dumps([r.model_dump(mode="json") for r in reports], indent=2)
+    elif as_csv:
+        payload = reports_to_csv(reports)
     else:
+        payload = None
+
+    if payload is not None:
+        if output is not None:
+            output.write_text(payload, encoding="utf-8")
+            err_console.print(f"[dim]Wrote {len(reports)} result(s) to {output}[/dim]")
+        else:
+            print(payload)
+    else:
+        # Pretty tables only make sense on the terminal, not a file.
+        if output is not None:
+            err_console.print(
+                "[red]Error:[/red] --output requires --json or --csv "
+                "(the table format is terminal-only)."
+            )
+            raise typer.Exit(code=2)
         for report in reports:
             render_report(report, console=console)
             console.print()

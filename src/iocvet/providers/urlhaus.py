@@ -8,6 +8,8 @@ https://auth.abuse.ch/ and generating a key in your profile.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import httpx
 
 from iocvet.core.models import IOCType, ProviderResult, Verdict
@@ -25,14 +27,17 @@ class URLhausProvider(Provider):
     #: HASH_TYPES: that set includes SHA1, which the payload endpoint cannot
     #: look up. Claiming SHA1 support would turn every SHA1 query into a
     #: silent "not found" — i.e. a false negative on a malware hash.
-    _HASH_FIELDS = {IOCType.MD5: "md5_hash", IOCType.SHA256: "sha256_hash"}
+    _HASH_FIELDS: ClassVar[dict[IOCType, str]] = {
+        IOCType.MD5: "md5_hash",
+        IOCType.SHA256: "sha256_hash",
+    }
 
     #: Types the /host/ endpoint can resolve. IPv4 is in; IPv6 is deliberately
     #: NOT, because abuse.ch documents the host parameter as a hostname/domain
     #: or IPv4 address and says nothing about IPv6. Claiming it anyway would
     #: turn every IPv6 lookup into a silent "no results" — the same false
     #: negative the SHA1/URLhaus bug produced. An honest skip is better.
-    _HOST_TYPES = (IOCType.DOMAIN, IOCType.IPV4)
+    _HOST_TYPES: ClassVar[tuple[IOCType, ...]] = (IOCType.DOMAIN, IOCType.IPV4)
 
     def supports(self, ioc_type: IOCType) -> bool:
         return (

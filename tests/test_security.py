@@ -241,6 +241,7 @@ def _run(*args, env_extra=None):
         [sys.executable, "-m", "iocvet", *args],
         capture_output=True,
         text=True,
+        check=False,
         env=env,
         cwd=str(__import__("pathlib").Path(__file__).parent.parent),
     )
