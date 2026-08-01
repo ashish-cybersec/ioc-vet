@@ -18,6 +18,7 @@ from rich.console import Console
 from iocvet import __version__
 from iocvet.config import ConfigError, ensure_config_scaffold
 from iocvet.core.aggregator import enrich, enrich_many, list_provider_status
+from iocvet.core.cache import DEFAULT_TTL_SECONDS, CacheError, ResultCache
 from iocvet.core.defang import is_defanged, refang
 from iocvet.core.detector import detect_ioc_type
 from iocvet.core.models import IOCType, Verdict
@@ -32,6 +33,34 @@ app = typer.Typer(
 console = Console()
 #: Warnings/errors go here so they never mix into piped --json output.
 err_console = Console(stderr=True)
+
+
+def _open_cache(no_cache: bool, ttl: int) -> ResultCache | None:
+    """Build a cache, or None when the user opted out.
+
+    A cache that can't be opened must never stop a lookup, so a CacheError
+    (e.g. a symlinked cache path) is reported once and the run continues
+    uncached rather than aborting.
+    """
+    if no_cache:
+        return None
+    cache = ResultCache(ttl_seconds=ttl)
+    try:
+        cache.purge_expired()
+    except CacheError as exc:
+        err_console.print(f"[yellow]Cache disabled:[/yellow] {exc}")
+        return None
+    return cache
+
+
+def _warn_if_cache_degraded(cache: ResultCache | None) -> None:
+    """Tell the user once if the cache fell over mid-run.
+
+    Silent degradation would mean a cron job quietly re-spending its whole
+    quota every night with nobody noticing.
+    """
+    if cache is not None and cache.degraded_reason:
+        err_console.print(f"[yellow]Cache disabled:[/yellow] {cache.degraded_reason}")
 
 
 def _version_callback(value: bool) -> None:
@@ -65,6 +94,18 @@ def lookup(
         "--fail-on-error",
         help="Exit 3 if no provider could check the IOC (fail-closed for security gates).",
     ),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", help="Bypass the on-disk cache entirely."
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Ignore cached answers and re-query, then update the cache."
+    ),
+    cache_ttl: int = typer.Option(
+        DEFAULT_TTL_SECONDS,
+        "--cache-ttl",
+        min=0,
+        help="How many seconds a cached answer stays valid (0 disables reuse).",
+    ),
 ) -> None:
     """Enrich a single IOC across every configured provider."""
     # Fail loudly on unparseable input. Previously a typo'd IOC ("8.8.8.888")
@@ -83,7 +124,13 @@ def lookup(
         # we read their pasted-from-a-ticket IOC the way they intended.
         err_console.print(f"[dim]Refanged input → {refang(ioc)}[/dim]")
 
-    report = asyncio.run(enrich(ioc))
+    cache = _open_cache(no_cache, cache_ttl)
+    try:
+        report = asyncio.run(enrich(ioc, cache=cache, refresh=refresh))
+    finally:
+        _warn_if_cache_degraded(cache)
+        if cache is not None:
+            cache.close()
 
     if as_json:
         print(report.model_dump_json(indent=2))
@@ -127,6 +174,18 @@ def batch(
         "--fail-on-error",
         help="Exit 3 if any IOC could not be checked by a single provider "
         "(fail-closed for security gates).",
+    ),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", help="Bypass the on-disk cache entirely."
+    ),
+    refresh: bool = typer.Option(
+        False, "--refresh", help="Ignore cached answers and re-query, then update the cache."
+    ),
+    cache_ttl: int = typer.Option(
+        DEFAULT_TTL_SECONDS,
+        "--cache-ttl",
+        min=0,
+        help="How many seconds a cached answer stays valid (0 disables reuse).",
     ),
 ) -> None:
     """Enrich every IOC in a file, one per line. Blank lines and lines
@@ -173,7 +232,13 @@ def batch(
         err_console.print("[red]Error:[/red] choose one of --json or --csv, not both.")
         raise typer.Exit(code=2)
 
-    reports = asyncio.run(enrich_many(iocs))
+    cache = _open_cache(no_cache, cache_ttl)
+    try:
+        reports = asyncio.run(enrich_many(iocs, cache=cache, refresh=refresh))
+    finally:
+        _warn_if_cache_degraded(cache)
+        if cache is not None:
+            cache.close()
 
     # Build the machine-readable payload once; write it to a file or stdout.
     if as_json:
@@ -210,6 +275,55 @@ def batch(
     # clean run (0) and from a malicious finding (1).
     if fail_on_error and any(not r.working_providers for r in reports):
         raise typer.Exit(code=3)
+
+
+cache_app = typer.Typer(help="Inspect or clear the on-disk result cache.")
+app.add_typer(cache_app, name="cache")
+
+
+@cache_app.command("stats")
+def cache_stats(
+    cache_ttl: int = typer.Option(
+        DEFAULT_TTL_SECONDS,
+        "--cache-ttl",
+        min=0,
+        help="TTL used to count expired entries.",
+    ),
+) -> None:
+    """Show where the cache lives and how much is in it."""
+    cache = ResultCache(ttl_seconds=cache_ttl)
+    try:
+        info = cache.stats()
+    except CacheError as exc:
+        err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+    finally:
+        cache.close()
+
+    if not info["available"]:
+        console.print(f"  cache unavailable at {info['path']}")
+        return
+    size_kb = int(info["size_bytes"]) / 1024
+    console.print(f"  path      {info['path']}")
+    console.print(f"  entries   {info['entries']} ({info['expired']} expired)")
+    console.print(f"  size      {size_kb:.1f} KiB")
+
+
+@cache_app.command("clear")
+def cache_clear() -> None:
+    """Delete every cached result.
+
+    Also useful for privacy: the cache records which indicators were looked up.
+    """
+    cache = ResultCache()
+    try:
+        removed = cache.clear()
+    except CacheError as exc:
+        err_console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=2) from None
+    finally:
+        cache.close()
+    console.print(f"  cleared {removed} cached result(s)")
 
 
 @app.command()
