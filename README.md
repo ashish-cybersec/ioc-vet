@@ -65,6 +65,13 @@ iocvet batch suspicious_ips.txt
 # Batch to CSV for a spreadsheet (one row per IOC/provider)
 iocvet batch suspicious_ips.txt --csv -o results.csv
 
+# Results are cached on disk, so a nightly cron job doesn't re-spend quota
+iocvet batch suspicious_ips.txt          # second run answers from cache
+iocvet batch suspicious_ips.txt --refresh   # force fresh data
+iocvet batch suspicious_ips.txt --no-cache  # bypass the cache entirely
+iocvet cache stats                          # what's cached, and where
+iocvet cache clear                          # wipe it
+
 # Internationalised domains work — pasted in their human-readable form
 iocvet lookup münchen.de
 
@@ -107,12 +114,42 @@ This exits non-zero on a malicious verdict *and* when no provider could reach a
 conclusion — so an outage in the threat-intel sources can't let an unchecked
 indicator pass as clean.
 
+## Caching
+
+Provider answers are cached on disk (`~/.cache/iocvet/cache.db`, override with
+`IOCVET_CACHE_DIR`) for 24 hours by default. This matters most for the workflow
+this tool is built for: a nightly cron job or CI pipeline re-checking the same
+indicators would otherwise burn its entire free-tier allowance — AbuseIPDB's is
+1,000 checks/day — re-asking questions it already has answers to.
+
+Two things are deliberately **never** cached:
+
+- **Errors and rate-limit responses**, which are transient. Caching a 500 would
+  let one upstream blip silently degrade every lookup until it expired.
+- **Skipped providers**, because a skip is configuration state rather than data.
+  If "no API key configured" were cached, adding the key would appear to do
+  nothing until the entry aged out.
+
+Cache entries are per provider, so adding a key or retrying one failed source
+doesn't discard everything else. Tune the lifetime with `--cache-ttl SECONDS`,
+and remember the tradeoff runs both ways: a longer TTL saves more quota, but a
+host that was clean yesterday can be compromised today.
+
+The database runs in WAL mode so several `iocvet` processes can share it — a
+nightly cron job and an ad-hoc batch at the same time won't lock each other
+out. Entries are capped at 50,000 with the oldest evicted first, so a very
+large feed can't grow the file without bound, and a cache that can't be opened
+or read simply degrades to no caching rather than failing the lookup.
+
 ## Security & privacy
 
 iocvet is built to be run against untrusted indicators, so it takes some care:
 
 - **Private and reserved IPs are never sent to external providers.** RFC1918, loopback, link-local (including cloud metadata `169.254.169.254`), and reserved addresses are recognised and skipped — they'd disclose internal network structure to a third party and no reputation source can rate them anyway.
 - **ip-api uses plaintext HTTP** (SSL is paid-tier on their side), so a public IP you look up is visible to an on-path observer. All other providers use HTTPS with certificate verification.
+- **The cache records which indicators you looked up**, which is sensitive in
+  itself. It is created `0600` in a `0700` directory, the tool refuses to use a
+  symlinked cache path, and `iocvet cache clear` wipes it.
 - Malformed inputs (path traversal, CRLF, multi-value smuggling, oversized strings) are rejected before any request is built. API keys are never written to output, errors, or `--json`.
 
 Set keys as environment variables, or run `iocvet configure` to generate a config file at `~/.config/iocvet/config.toml`:

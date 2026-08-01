@@ -12,8 +12,9 @@ import httpx
 
 from iocvet import __version__
 from iocvet.config import get_api_key
+from iocvet.core.cache import ResultCache
 from iocvet.core.detector import detect_ioc_type, normalize
-from iocvet.core.models import EnrichmentReport, IOCType
+from iocvet.core.models import EnrichmentReport, IOCType, ProviderResult
 from iocvet.providers import ALL_PROVIDERS, Provider
 
 _USER_AGENT = f"iocvet/{__version__} (+https://github.com/ashish-cybersec/ioc-vet)"
@@ -47,28 +48,78 @@ async def _enrich_one(
     client: httpx.AsyncClient,
     raw_ioc: str,
     ioc_type: IOCType | None = None,
+    cache: ResultCache | None = None,
+    refresh: bool = False,
 ) -> EnrichmentReport:
     resolved_type = ioc_type or detect_ioc_type(raw_ioc)
     ioc = normalize(raw_ioc, resolved_type)
 
-    results = await asyncio.gather(*(p.run(client, ioc, resolved_type) for p in providers))
+    # Split providers into cache hits and the ones that still need querying.
+    # --refresh skips the read but still writes, so a user can force fresh data
+    # without throwing away the whole cache.
+    cached: list[ProviderResult] = []
+    to_query: list[Provider] = []
+    for provider in providers:
+        hit = (
+            cache.get(resolved_type, ioc, provider.name)
+            if cache is not None and not refresh
+            else None
+        )
+        if hit is not None:
+            cached.append(hit)
+        else:
+            to_query.append(provider)
 
-    report = EnrichmentReport(ioc=ioc, ioc_type=resolved_type, results=list(results))
+    fresh = list(
+        await asyncio.gather(*(p.run(client, ioc, resolved_type) for p in to_query))
+    )
+
+    if cache is not None:
+        for result in fresh:
+            # put() ignores errors and skips itself; see cache module docstring.
+            cache.put(resolved_type, ioc, result)
+
+    # Restore registration order. Without this the ordering would depend on
+    # which providers happened to be cached, making output non-deterministic
+    # across runs and producing noisy diffs in CI.
+    position = {p.name: i for i, p in enumerate(providers)}
+    results = sorted(cached + fresh, key=lambda r: position.get(r.provider, len(position)))
+
+    report = EnrichmentReport(ioc=ioc, ioc_type=resolved_type, results=results)
     report.overall_verdict = report.compute_overall_verdict()
+    # True only when nothing was actually contacted. Note that a *skipped*
+    # provider (no API key, unsupported type, private IP) never touches the
+    # network, so it must not count as a live query — otherwise a report served
+    # entirely from cache alongside three skips would wrongly look fresh.
+    contacted_network = any(r.skipped_reason is None for r in fresh)
+    report.from_cache = bool(cached) and not contacted_network
     return report
 
 
-async def enrich(raw_ioc: str, *, ioc_type: IOCType | None = None) -> EnrichmentReport:
+async def enrich(
+    raw_ioc: str,
+    *,
+    ioc_type: IOCType | None = None,
+    cache: ResultCache | None = None,
+    refresh: bool = False,
+) -> EnrichmentReport:
     """Detect (or accept a forced) IOC type, run every applicable provider
     concurrently, and return a populated report.
+
+    Pass ``cache`` to serve previously-seen provider answers from disk;
+    ``refresh`` re-queries everything but still refreshes the cache.
     """
     providers = _instantiate_providers()
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}, limits=_LIMITS) as client:
-        return await _enrich_one(providers, client, raw_ioc, ioc_type)
+        return await _enrich_one(providers, client, raw_ioc, ioc_type, cache, refresh)
 
 
 async def enrich_many(
-    raw_iocs: Iterable[str], *, concurrency: int = _DEFAULT_CONCURRENCY
+    raw_iocs: Iterable[str],
+    *,
+    concurrency: int = _DEFAULT_CONCURRENCY,
+    cache: ResultCache | None = None,
+    refresh: bool = False,
 ) -> list[EnrichmentReport]:
     """Enrich a batch of IOCs, reusing one HTTP client and one set of provider
     instances across the whole run.
@@ -104,7 +155,7 @@ async def enrich_many(
 
         async def _bounded(ioc: str) -> EnrichmentReport:
             async with semaphore:
-                return await _enrich_one(providers, client, ioc)
+                return await _enrich_one(providers, client, ioc, None, cache, refresh)
 
         return list(await asyncio.gather(*(_bounded(ioc) for ioc in unique)))
 
