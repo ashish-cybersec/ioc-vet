@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ioc-vet"
-version = "0.4.0"
+version = "0.4.1"
 description = "Fast, multi-source IOC enrichment from your terminal — IPs, domains, URLs, and hashes against AbuseIPDB, URLhaus, and more."
 readme = "README.md"
 license = "MIT"

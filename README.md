@@ -4,27 +4,65 @@
 [![Python](https://img.shields.io/pypi/pyversions/ioc-vet)](https://pypi.org/project/ioc-vet/)
 [![CI](https://github.com/ashish-cybersec/ioc-vet/actions/workflows/ci.yml/badge.svg)](https://github.com/ashish-cybersec/ioc-vet/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Changelog](https://img.shields.io/badge/changelog-md-blue)](CHANGELOG.md)
 
 Multi-source IOC enrichment from your terminal. Drop in an IP, domain, URL, or file hash — get back a unified verdict pulled from multiple threat intel sources in parallel, instead of opening five browser tabs.
 
-```
-$ iocvet lookup 185.220.101.45
+**Paste indicators exactly as they arrive.** Defanged IOCs from a ticket, an
+email, or a threat report work as-is — no manual cleanup:
 
-╭──────────────────────────────────────────────────╮
-│ 185.220.101.45  [ipv4]   SUSPICIOUS               │
-╰──────────────────────────────────────────────────╯
-Provider    Verdict       Summary                                Latency
-ip-api       SUSPICIOUS    Germany · M247 Europe SRL · known...   180ms
-abuseipdb    SUSPICIOUS    abuse confidence 42/100 across 11...   310ms
-
-abuseipdb → https://www.abuseipdb.com/check/185.220.101.45
 ```
+$ iocvet lookup 'hxxp://evil[.]com/payload.exe'
+Refanged input → http://evil.com/payload.exe
+```
+
+Here's a real lookup against a live compromised host, pulled from URLhaus's
+own feed. The hostname is redacted — it's a small business that was breached,
+not an attacker, and it has presumably been cleaned up since:
+
+```
+$ iocvet lookup redacted-clinic.example
+
+╭──────────────────────────────────────────────╮
+│ redacted-clinic.example  [domain]  MALICIOUS │
+╰──────────────────────────────────────────────╯
+Provider   Verdict      Summary                                         Latency
+ip-api     skipped      does not support IOC type 'domain'                    —
+abuseipdb  skipped      does not support IOC type 'domain'                    —
+rdap       UNKNOWN      registration date not published · Example         641ms
+                        Domains Inc.
+urlhaus    MALICIOUS    2 malware URL(s) currently online, 2 recorded     499ms
+                        — blacklisted: spamhaus_dbl, surbl
+
+rdap → https://client.rdap.org/?type=domain&object=redacted-clinic.example
+urlhaus → https://urlhaus.abuse.ch/host/redacted-clinic.example/
+```
+
+A legitimate medical practice's website, compromised and serving malware. Two
+providers answered, one found it, and the overall verdict follows the worst
+finding — which is why "clean" from a single source isn't good enough.
 
 ## Why this exists
 
 Most tools in this space are built to be clicked, not scripted. Browser extensions and note-taking plugins solve the same problem, but they only run while a human is looking at a screen — and the ones that go further usually paywall the providers that actually matter (AbuseIPDB, URLhaus) behind a paid tier.
 
 ioc-vet is built for the other half of the job: the part that runs in a CI pipeline, a cron job checking yesterday's suspicious IPs, or a one-line `grep | iocvet batch` over last night's logs. It works out of the box with zero API keys, gets better as you add free ones, and every provider it supports is free — there's no Pro tier holding anything back.
+
+## What it does
+
+- **Accepts defanged indicators** — `evil[.]com`, `hxxp://…`, `1[.]2[.]3[.]4`,
+  `evil[dot]com`. Paste from a ticket without editing.
+- **Handles internationalised domains** — `münchen.de`, `россия.рф`, `例え.jp`.
+  Homograph domains are a phishing staple, so they can't be a blind spot.
+- **Auto-detects the type** — IPv4/IPv6, domain, URL, MD5/SHA1/SHA256.
+- **Queries providers in parallel** and merges them into one verdict.
+- **Caches on disk** so a nightly job doesn't re-spend its API quota.
+- **Built for pipelines** — `--json`, `--csv`, and distinct exit codes so a CI
+  gate can fail closed.
+- **Never sends your internal IPs to a third party** — RFC1918 and cloud
+  metadata addresses are recognised and skipped.
+- **Zero API keys required** to start; every provider it supports has a free
+  tier, and there's no Pro version withholding features.
 
 ## Install
 
@@ -191,11 +229,27 @@ Register it in `src/iocvet/providers/__init__.py` and open a PR. Good candidates
 
 ## Roadmap
 
-- [ ] SQLite response caching (avoid re-querying the same IOC within a TTL)
-- [x] Domain support (RDAP registration data + URLhaus host lookups)
-- [ ] VirusTotal, OTX, GreyNoise, Shodan providers
-- [ ] Markdown / CSV report export for tickets
-- [ ] `--watch` mode to tail a log file and enrich IOCs as they appear
+Shipped:
+
+- [x] Domain support (RDAP registration data + URLhaus host lookups) — v0.2.0
+- [x] Defanged IOC input (`evil[.]com`, `hxxp://…`) — v0.2.0
+- [x] Internationalised domain (IDN) support — v0.3.0
+- [x] CSV export for tickets and spreadsheets — v0.3.0
+- [x] SQLite response caching with TTL — v0.4.0
+
+Planned:
+
+- [ ] MalwareBazaar provider (reuses the URLhaus key you already have)
+- [ ] AlienVault OTX provider (covers domains, URLs, and hashes)
+
+Ideas, not commitments — [open an issue](https://github.com/ashish-cybersec/ioc-vet/issues)
+if one of these would help you and it'll get prioritised:
+
+- Markdown report export
+- `--watch` mode to tail a log file and enrich IOCs as they appear
+- GreyNoise / Shodan providers
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## License
 

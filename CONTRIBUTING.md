@@ -35,3 +35,9 @@ Keep PRs focused on one provider or one feature. Include tests — mocked, not l
 ## Releasing
 
 Maintainers: see [RELEASING.md](RELEASING.md).
+
+## Changelog
+
+User-visible changes go in [CHANGELOG.md](CHANGELOG.md) under an `Unreleased`
+heading. Bug fixes that were never in a release don't need an entry — the
+changelog is for people upgrading, not a commit log.
