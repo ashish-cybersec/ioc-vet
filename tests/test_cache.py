@@ -10,6 +10,7 @@ Both are exercised here directly rather than inferred from call counts.
 """
 
 import asyncio
+import os
 import sqlite3
 import time
 
@@ -275,6 +276,11 @@ async def test_lookup_still_works_with_a_corrupt_cache(tmp_path):
     assert report.results[0].ok, "a broken cache must not break the lookup"
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX permission bits are ignored on this platform "
+    "(see config.PERMISSIONS_ENFORCED)",
+)
 def test_symlinked_cache_path_is_refused(tmp_path):
     """Same TOCTOU class as the config file: a pre-planted symlink would let a
     local attacker redirect our writes and our chmod onto a file of theirs.
@@ -292,6 +298,11 @@ def test_symlinked_cache_path_is_refused(tmp_path):
     assert victim.read_text() == "secret"
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX permission bits are ignored on this platform "
+    "(see config.PERMISSIONS_ENFORCED)",
+)
 def test_cache_file_and_directory_permissions(tmp_path):
     """The cache records which indicators were investigated — sensitive on a
     shared host.
@@ -503,6 +514,11 @@ def test_wal_mode_is_enabled(tmp_path):
     assert mode.lower() == "wal"
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX permission bits are ignored on this platform "
+    "(see config.PERMISSIONS_ENFORCED)",
+)
 def test_wal_sidecar_files_are_not_world_readable(tmp_path):
     """The -wal and -shm files hold the same investigative data as the main
     database, so they need the same 0600 treatment.

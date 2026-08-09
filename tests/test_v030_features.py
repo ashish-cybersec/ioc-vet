@@ -189,7 +189,11 @@ def test_cli_batch_idn_domain_flows_through(tmp_path):
     not silently dropped as unparseable.
     """
     f = tmp_path / "iocs.txt"
-    f.write_text("münchen.de\n")
+    # Explicit encoding: Path.write_text() defaults to the *locale* encoding,
+    # which is cp1252 on Windows. That would write "ü" as a byte the tool
+    # correctly rejects as non-UTF-8, making this test fail for a reason that
+    # has nothing to do with IDN handling.
+    f.write_text("münchen.de\n", encoding="utf-8")
     proc = _run_cli("batch", str(f), "--json", tmp_path=tmp_path)
     import json
 

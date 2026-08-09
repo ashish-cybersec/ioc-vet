@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Release dates are on the [releases page](https://github.com/ashish-cybersec/ioc-vet/releases).
 
+## [0.4.2] — 2026-08-01
+
+### Fixed
+
+- **The documented file-permission guarantee was false on Windows.** The README
+  stated unconditionally that the cache and config file are created `0600` in a
+  `0700` directory. Windows ignores every permission bit except read-only, so
+  `chmod` there neither failed nor protected anything — API keys and the record
+  of investigated indicators were left unrestricted while the docs implied
+  otherwise. The claim is now scoped to Linux and macOS, `chmod` is skipped
+  where the platform ignores it, and `iocvet configure` warns on Windows and
+  recommends environment variables instead.
+
+### Fixed (found by the new Windows CI job on its first run)
+
+- **The test suite crashed on Windows.** A ReDoS test passed a 40,000-character
+  string as a pytest parameter, which becomes part of the test's node ID and is
+  written to the `PYTEST_CURRENT_TEST` environment variable. Windows caps
+  environment variables at 32,767 characters, so the runner raised `ValueError`
+  where Linux had silently allowed it. The pathological strings are now built
+  inside the test with short parameter IDs; the same inputs are still tested.
+- **A test wrote a fixture file in the wrong encoding on Windows.**
+  `Path.write_text()` defaults to the *locale* encoding — UTF-8 on Linux,
+  cp1252 on Windows — so a Unicode domain was written as bytes the tool
+  correctly rejected as non-UTF-8. The fixture now specifies UTF-8 explicitly.
+  (The tool's behaviour was right; the test was wrong.)
+- `iocvet configure` now writes the config scaffold with an explicit UTF-8
+  encoding rather than relying on the platform locale.
+
+### Added
+
+- Python 3.13 to the test matrix and the package classifiers. It had gone
+  untested despite being the default on current distributions.
+- A Windows job in CI. The tool had shipped five releases without ever being
+  tested on a non-POSIX platform.
+- A "What it isn't" section in the README — VirusTotal coverage, historical
+  pivoting, and commercial use at work are all outside what this does.
+
 ## [0.4.1] — 2026-08-01
 
 ### Documentation
@@ -130,6 +168,7 @@ Release dates are on the [releases page](https://github.com/ashish-cybersec/ioc-
 - Parallel provider queries with a unified verdict.
 - `--json` output and `--fail-on-malicious` for CI use.
 
+[0.4.2]: https://github.com/ashish-cybersec/ioc-vet/releases/tag/v0.4.2
 [0.4.1]: https://github.com/ashish-cybersec/ioc-vet/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ashish-cybersec/ioc-vet/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ashish-cybersec/ioc-vet/releases/tag/v0.3.0

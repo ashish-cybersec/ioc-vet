@@ -6,6 +6,7 @@ must hold for the tool to be safe to run against attacker-supplied input.
 """
 
 import asyncio
+import os
 import time
 
 import httpx
@@ -146,15 +147,21 @@ def test_injection_payloads_are_blocked(payload):
 # --- ReDoS: detection stays linear on pathological input ---------------------
 
 
+# The pathological strings are built inside the test rather than passed as
+# parameters: pytest puts each parameter into the test's node ID, and sets that
+# ID in the PYTEST_CURRENT_TEST environment variable. Windows caps environment
+# variables at 32,767 characters, so a 40,000-character parameter crashes the
+# runner there while passing silently on Linux. Short ids, long strings.
 @pytest.mark.parametrize(
-    "evil",
+    "builder",
     [
-        "a." * 20_000,
-        "a" * 2048 + "!",
-        "a" + "-" * 2000 + "a.com",
+        pytest.param(lambda: "a." * 20_000, id="many-short-labels"),
+        pytest.param(lambda: "a" * 2048 + "!", id="long-label-no-match"),
+        pytest.param(lambda: "a" + "-" * 2000 + "a.com", id="hyphen-run"),
     ],
 )
-def test_detection_is_not_catastrophic(evil):
+def test_detection_is_not_catastrophic(builder):
+    evil = builder()
     start = time.perf_counter()
     detect_ioc_type(evil)
     elapsed = time.perf_counter() - start
@@ -290,6 +297,11 @@ def test_batch_non_utf8_file_gives_clean_error_not_traceback(tmp_path):
 # --- G4: config symlink refusal ----------------------------------------------
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX permission bits are ignored on this platform "
+    "(see config.PERMISSIONS_ENFORCED)",
+)
 def test_config_scaffold_refuses_symlink(tmp_path, monkeypatch):
     from iocvet.config import ConfigError, ensure_config_scaffold
 
@@ -320,3 +332,44 @@ def test_rate_limiter_rejects_non_positive_rate():
         RateLimiter(0)
     with pytest.raises(ValueError):
         RateLimiter(-5)
+
+
+# --- platform-aware file permissions (v0.4.2) --------------------------------
+
+
+def test_permissions_enforced_flag_matches_platform():
+    from iocvet.config import PERMISSIONS_ENFORCED
+
+    assert PERMISSIONS_ENFORCED == (os.name == "posix")
+
+
+def test_config_scaffold_works_where_permissions_are_ignored(tmp_path, monkeypatch):
+    """On Windows os.chmod can only set the read-only bit, so the 0600 call
+    neither fails nor protects. The scaffold must still work there — and the
+    CLI says plainly that the file isn't restricted rather than implying it is.
+    """
+    monkeypatch.setattr("iocvet.config.PERMISSIONS_ENFORCED", False)
+    monkeypatch.setattr("iocvet.config.CONFIG_DIR", tmp_path / "cfg")
+    monkeypatch.setattr("iocvet.config.CONFIG_PATH", tmp_path / "cfg" / "config.toml")
+
+    from iocvet.config import ensure_config_scaffold
+
+    path = ensure_config_scaffold()
+    assert path.exists()
+    assert "[keys]" in path.read_text()
+
+
+def test_cache_works_where_permissions_are_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr("iocvet.core.cache.PERMISSIONS_ENFORCED", False)
+
+    from iocvet.core.cache import ResultCache
+    from iocvet.core.models import ProviderResult
+
+    cache = ResultCache(path=tmp_path / "c.db")
+    cache.put(IOCType.IPV4, "8.8.8.8", ProviderResult(provider="p", summary="ok"))
+    hit = cache.get(IOCType.IPV4, "8.8.8.8", "p")
+    entries = cache.stats()["entries"]
+    cache.close()
+
+    assert hit is not None
+    assert entries == 1

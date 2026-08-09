@@ -16,6 +16,13 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover - exercised on 3.10 CI only
     import tomli as tomllib
 
+#: POSIX permission bits are only meaningful where the OS honours them. On
+#: Windows, os.chmod can set the read-only flag and nothing else — every other
+#: bit is silently ignored — so a 0600 call there neither fails nor protects.
+#: This tool stores API keys and a record of everything you've investigated, so
+#: it says plainly when it can't secure them rather than implying it has.
+PERMISSIONS_ENFORCED = os.name == "posix"
+
 CONFIG_DIR = Path(os.environ.get("IOCVET_CONFIG_DIR", Path.home() / ".config" / "iocvet"))
 CONFIG_PATH = CONFIG_DIR / "config.toml"
 
@@ -83,13 +90,16 @@ def ensure_config_scaffold() -> Path:
     """Create an empty, commented config file on first run so users have
     something to edit instead of guessing the schema. Idempotent.
 
-    The file is created 0600: it is expected to hold API keys, and a
-    world-readable secrets file on a shared host is a real problem.
+    On POSIX the file is created 0600: it holds API keys, and a world-readable
+    secrets file on a shared host is a real problem. On Windows those bits are
+    ignored by the OS — see PERMISSIONS_ENFORCED — and the CLI warns rather
+    than pretending the file is protected.
     """
     # `mode=` only applies when mkdir actually creates the directory, so an
     # existing dir keeps whatever permissions it had. chmod unconditionally.
     CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    CONFIG_DIR.chmod(0o700)
+    if PERMISSIONS_ENFORCED:
+        CONFIG_DIR.chmod(0o700)
     # Refuse to touch a symlinked config: on a shared host a local attacker
     # could pre-plant config.toml as a symlink to a file they want chmod'd or
     # truncated, and our chmod/write would follow it to the target.
@@ -100,7 +110,11 @@ def ensure_config_scaffold() -> Path:
         )
     if not CONFIG_PATH.exists():
         CONFIG_PATH.touch(mode=0o600)
-        CONFIG_PATH.write_text(_EXAMPLE_CONFIG)
-    else:
+        # Explicit encoding: write_text() otherwise uses the locale encoding,
+        # which differs on Windows. The template is ASCII today, but this file
+        # holds user-edited content and the default should never be locale-
+        # dependent for something we later read back as UTF-8.
+        CONFIG_PATH.write_text(_EXAMPLE_CONFIG, encoding="utf-8")
+    elif PERMISSIONS_ENFORCED:
         CONFIG_PATH.chmod(0o600)
     return CONFIG_PATH
