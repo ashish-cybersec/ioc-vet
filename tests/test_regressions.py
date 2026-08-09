@@ -4,6 +4,7 @@ Each test here corresponds to a specific defect that shipped or nearly shipped.
 They exist so the same mistake can't return quietly.
 """
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -170,6 +171,11 @@ def test_env_var_wins_and_skips_the_file_entirely(tmp_path, monkeypatch):
     assert get_api_key("ABUSEIPDB_API_KEY", "abuseipdb") == "from-env"
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX permission bits are ignored on this platform "
+    "(see config.PERMISSIONS_ENFORCED)",
+)
 def test_config_scaffold_is_not_world_readable(tmp_path, monkeypatch):
     monkeypatch.setattr("iocvet.config.CONFIG_DIR", tmp_path / "cfg")
     monkeypatch.setattr("iocvet.config.CONFIG_PATH", tmp_path / "cfg" / "config.toml")
@@ -181,6 +187,11 @@ def test_config_scaffold_is_not_world_readable(tmp_path, monkeypatch):
     assert path.parent.stat().st_mode & 0o777 == 0o700
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX permission bits are ignored on this platform "
+    "(see config.PERMISSIONS_ENFORCED)",
+)
 def test_config_scaffold_tightens_preexisting_loose_permissions(tmp_path, monkeypatch):
     """mkdir(mode=...) is a no-op on an existing directory, so a dir created
     by something else kept its permissions.

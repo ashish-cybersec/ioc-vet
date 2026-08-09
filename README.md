@@ -64,6 +64,16 @@ ioc-vet is built for the other half of the job: the part that runs in a CI pipel
 - **Zero API keys required** to start; every provider it supports has a free
   tier, and there's no Pro version withholding features.
 
+## What it isn't
+
+- **Not a VirusTotal client.** If you have a VT key, their own tooling covers
+  more sources than this does. ioc-vet exists for the case where you don't.
+- **Not a replacement for a paid TI platform.** No historical pivoting, no
+  campaign attribution, no graph. It answers "is this indicator known bad,
+  right now, according to a few free sources".
+- **Not an enterprise tool.** ip-api's free tier forbids commercial use, so
+  running this at work means dropping that provider or paying them.
+
 ## Install
 
 ```bash
@@ -186,8 +196,11 @@ iocvet is built to be run against untrusted indicators, so it takes some care:
 - **Private and reserved IPs are never sent to external providers.** RFC1918, loopback, link-local (including cloud metadata `169.254.169.254`), and reserved addresses are recognised and skipped — they'd disclose internal network structure to a third party and no reputation source can rate them anyway.
 - **ip-api uses plaintext HTTP** (SSL is paid-tier on their side), so a public IP you look up is visible to an on-path observer. All other providers use HTTPS with certificate verification.
 - **The cache records which indicators you looked up**, which is sensitive in
-  itself. It is created `0600` in a `0700` directory, the tool refuses to use a
-  symlinked cache path, and `iocvet cache clear` wipes it.
+  itself. On Linux and macOS it is created `0600` in a `0700` directory and the
+  tool refuses to use a symlinked cache path. **On Windows those permission
+  bits are ignored by the OS**, so neither the cache nor `config.toml` is
+  restricted to your user — prefer environment variables for API keys there.
+  `iocvet cache clear` wipes the cache on any platform.
 - Malformed inputs (path traversal, CRLF, multi-value smuggling, oversized strings) are rejected before any request is built. API keys are never written to output, errors, or `--json`.
 
 Set keys as environment variables, or run `iocvet configure` to generate a config file at `~/.config/iocvet/config.toml`:

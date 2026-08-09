@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 from typing import TypedDict
 
+from iocvet.config import PERMISSIONS_ENFORCED
 from iocvet.core.models import IOCType, ProviderResult
 
 CACHE_DIR = Path(
@@ -130,8 +131,10 @@ class ResultCache:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             # mkdir(mode=) is a no-op on an existing directory, so tighten it
-            # unconditionally — same reasoning as the config directory.
-            self.path.parent.chmod(0o700)
+            # unconditionally — same reasoning as the config directory. Skipped
+            # where the OS ignores the bits anyway (Windows).
+            if PERMISSIONS_ENFORCED:
+                self.path.parent.chmod(0o700)
 
             # A pre-planted symlink here would let a local attacker on a shared
             # host redirect our writes (and our chmod) onto a file of their
@@ -142,13 +145,10 @@ class ResultCache:
                     "Remove it and re-run."
                 )
 
-            existed = self.path.exists()
             conn = sqlite3.connect(self.path, check_same_thread=False)
-            if not existed:
+            if PERMISSIONS_ENFORCED:
                 # The cache records which indicators were investigated, which is
                 # sensitive on a shared machine.
-                self.path.chmod(0o600)
-            else:
                 self.path.chmod(0o600)
 
             self._prepare(conn)
@@ -197,6 +197,8 @@ class ResultCache:
 
     def _secure_sidecars(self) -> None:
         """Tighten permissions on the WAL sidecar files if they exist."""
+        if not PERMISSIONS_ENFORCED:
+            return
         for suffix in ("-wal", "-shm"):
             sidecar = self.path.with_name(self.path.name + suffix)
             try:

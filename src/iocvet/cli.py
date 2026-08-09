@@ -16,7 +16,7 @@ import typer
 from rich.console import Console
 
 from iocvet import __version__
-from iocvet.config import ConfigError, ensure_config_scaffold
+from iocvet.config import PERMISSIONS_ENFORCED, ConfigError, ensure_config_scaffold
 from iocvet.core.aggregator import enrich, enrich_many, list_provider_status
 from iocvet.core.cache import DEFAULT_TTL_SECONDS, CacheError, ResultCache
 from iocvet.core.defang import is_defanged, refang
@@ -346,6 +346,14 @@ def configure() -> None:
     """Create a config file scaffold at ~/.config/iocvet/config.toml."""
     path = ensure_config_scaffold()
     console.print(f"Config file ready at [bold]{path}[/bold]")
+    if not PERMISSIONS_ENFORCED:
+        # Say so rather than let the file look protected when it isn't: this
+        # file holds API keys, and on Windows the 0600 bits are ignored.
+        err_console.print(
+            "[yellow]Note:[/yellow] this platform doesn't honour POSIX file "
+            "permissions, so the config file is not restricted to your user. "
+            "Prefer environment variables for API keys here."
+        )
     console.print("Add your free API keys there, or set environment variables instead:")
     console.print("  [dim]export ABUSEIPDB_API_KEY=...[/dim]")
     console.print("  [dim]export URLHAUS_AUTH_KEY=...[/dim]")

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ioc-vet"
-version = "0.4.1"
+version = "0.4.2"
 description = "Fast, multi-source IOC enrichment from your terminal — IPs, domains, URLs, and hashes against AbuseIPDB, URLhaus, and more."
 readme = "README.md"
 license = "MIT"
@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
 ]
 dependencies = [
